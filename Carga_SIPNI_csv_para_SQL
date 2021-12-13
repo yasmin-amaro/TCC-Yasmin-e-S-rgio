@@ -1,0 +1,28 @@
+#Importando pacotes
+import pandas as pd
+import dask.dataframe as dd
+import os
+import sys
+import psycopg2
+from psycopg2 import OperationalError, errorcodes, errors
+import psycopg2.extras as extras
+from io import StringIO
+import numpy as np
+from sqlalchemy import create_engine
+import seaborn as sns
+import matplotlib.pyplot as plt
+import io
+import sqlalchemy
+
+#Criando engine do sqlalchemy
+engine = create_engine('postgresql://postgres@localhost:5432/vacinacao')
+
+conn = psycopg2.connect("host=localhost dbname=vacinacao user=postgres password=postgres")
+cur = conn.cursor()
+
+chunk = pd.read_csv('C:/Users/Yasmin/OneDrive/Documentos/TCC/sipni_sp.csv', sep = ';', chunksize=100000, dtype = 'object')
+i = 0
+for a in chunk: 
+    a.to_sql('SIPNI_SP', 'postgresql://postgres:postgres@localhost:5432/vacinacao',if_exists='append', index = False, chunksize=1000, dtype = sqlalchemy.VARCHAR, method='multi')
+    i+=1
+    print('Index:{}'.format(i))
