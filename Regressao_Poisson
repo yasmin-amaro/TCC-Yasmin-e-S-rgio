@@ -1,0 +1,818 @@
+#aplicação do modelo de regressão de poisson por Estado
+
+import pandas as pd
+import psycopg2
+from sqlalchemy import create_engine
+import seaborn as sns
+import numpy as np
+import plotly.express as px
+from patsy import dmatrices
+import numpy as np
+import statsmodels.api as sm
+import matplotlib
+import matplotlib.pyplot as plt
+import sys
+# Standard Library Imports
+from pathlib import Path
+
+# Installed packages
+import pandas as pd
+from ipywidgets import widgets
+
+# Our package
+from pandas_profiling import ProfileReport
+from pandas_profiling.utils.cache import cache_file
+
+
+#SÃO PAULO
+
+base_sp = pd.read_excel("C:/Users/Yasmin/OneDrive/Documentos/TCC/python/df_agp_sp.xlsx")
+base_sp = base_sp.astype({'new_deaths': float})
+base_sp.head()
+
+poucas_mortes = base_sp.groupby(['estabelecimento_municipio_nome','city_ibge_code'])['new_deaths'].sum()
+poucas_mortes = poucas_mortes.nsmallest(10)
+poucas_mortes
+
+base_sp = base_sp.replace({'new_deaths': {0.0 : 0.1}})
+base_sp.head()
+
+base_sp = base_sp[(base_sp['estabelecimento_municipio_nome'] != 'MONCOES') &
+    (base_sp['estabelecimento_municipio_nome'] != 'CASSIA DOS COQUEIROS') &
+    (base_sp['estabelecimento_municipio_nome'] != 'PRACINHA')&
+    (base_sp['estabelecimento_municipio_nome'] != 'QUEIROZ')&
+    (base_sp['estabelecimento_municipio_nome'] != 'RIBEIRAO GRANDE')&
+    (base_sp['estabelecimento_municipio_nome'] != 'SAO JOSE DO BARREIRO')]
+    
+estatisticas = pd.DataFrame(columns=['lag','cod_ibge_mun','coef_cob_vac','aic','aicc','bic', 'pseudo_r'])
+estatisticas
+
+def gerando_estatisticas(df, df_estats, city):
+    for i in city:
+        #Separando por município
+        mun = df.loc[df['city_ibge_code'] == i]
+        # Lag de Semanas
+        for l in range(1,8):
+            b = mun[l:]
+            lista = list(mun.new_deaths[len(mun)-len(b):])
+            a = mun
+            if l == 1:
+                lista.append(0.0)   
+            elif l == 2:
+                lista.append(0.0) 
+                lista.append(0.0)
+            elif l == 3:
+                lista.append(0.0) 
+                lista.append(0.0)
+                lista.append(0.0)
+            elif l == 4:
+                lista.append(0.0) 
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+            elif l == 5:
+                lista.append(0.0) 
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+            elif l == 6:
+                lista.append(0.0) 
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+            else:
+                lista.append(0.0) 
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+                lista.append(0.0)
+            a['mortes_lag'] = lista
+
+            a = a[:-l]
+
+            #Treinando o modelo
+            mask = np.random.rand(len(a)) < 1
+            df_train = a[mask]
+            df_test = a[~mask]
+            expr = """mortes_lag ~  cobertura_vacinal"""
+            y_train, X_train = dmatrices(expr, df_train, return_type='dataframe')
+            poisson_training_results = sm.GLM(y_train, X_train, family=sm.families.Poisson()).fit()
+
+            #Preenchendo o Dataframe
+            linha = {'lag':l, 'cod_ibge_mun':i, 'coef_cob_vac': poisson_training_results.params.cobertura_vacinal, 'aic':poisson_training_results.aic, 'aicc': sm.tools.eval_measures.aicc(poisson_training_results.llf,poisson_training_results.nobs,2) ,'bic':poisson_training_results.bic, 'pseudo_r':poisson_training_results.pseudo_rsquared(), 'pvalue': poisson_training_results.pvalues.cobertura_vacinal}      
+            df_estats = df_estats.append(linha, ignore_index=True)           
+            
+    df_estats.astype({'lag':int})
+    return df_estats
+        
+estatisticas = gerando_estatisticas(base_sp, estatisticas, city)
+estatisticas
+
+estatisticas = estatisticas.replace({'aicc': {np.Infinity:100000.0}})
+aicc_min_sp = estatisticas.groupby(['cod_ibge_mun'])['aicc'].min()
+aicc_min_sp = aicc_min_sp.reset_index()
+
+aicc_min_sp = pd.merge(aicc_min_sp,estatisticas[['cod_ibge_mun','aicc','lag']], how='left', on = ['cod_ibge_mun', 'aicc'])
+aicc_min_sp.drop(aicc_min_sp.index[(aicc_min_sp["aicc"] == 100000.0)],axis=0,inplace=True)
+
+plt.figure()
+labels = ['aicc']
+
+fig, (ax1) = plt.subplots(nrows=1, ncols=1, figsize=(9, 4))
+
+# rectangular box plot
+bplot1 = ax1.boxplot(aicc_min_sp['aicc'],
+                     vert=False,  # vertical box alignment
+                     patch_artist=True,  # fill with color
+                     labels=labels)  # will be used to label x-ticks
+ax1.set_title('Frequência AICc')
+
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=aicc_min_sp, x="lag",discrete=True)
+ax.set_ylabel('Frequência do AICc')
+
+r_max_sp = estatisticas.groupby(['cod_ibge_mun'])['pseudo_r'].max()
+r_max_sp = r_max_sp.reset_index()
+r_max_sp.dropna(axis=0,inplace=True)
+r_max_sp = pd.merge(r_max_sp,estatisticas[['cod_ibge_mun','pseudo_r','lag']], how='left', on = ['cod_ibge_mun', 'pseudo_r'])
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=r_max_sp, x="lag",discrete=True)
+ax.set_ylabel('Frequência de pseudo R²')
+
+
+base_sp2 = pd.DataFrame(columns=['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome',	
+    'sem_epidem_ano', 'qt_vacinados', 'qt_vacinados_acum', 'PIB_P_CAP',	'GINI',	'POP', 'city_ibge_code', 'cobertura_vacinal',	
+    'new_confirmed', 'new_deaths', 'mortes_lag'])
+for i in city:
+    #Separando por município
+    mun = base_sp.loc[base_sp['city_ibge_code'] == i]
+    # Lag de Semanas
+    b = mun[7:]
+    lista = list(mun.new_deaths[len(mun)-len(b):])
+    a = mun
+    lista.append(0.0) 
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    a['mortes_lag'] = lista
+    base_sp2 = base_sp2.append(a)
+
+base_sp2.head()
+
+
+fig, ax = plt.subplots(figsize=(16,8))
+ax.scatter(base_sp2['cobertura_vacinal'],base_sp2['mortes_lag'])
+ax.set_xlabel('cobertura vacinal')
+ax.set_ylabel('Número de mortes com lag 7')
+plt.show()
+
+
+estatisticas7 = estatisticas[estatisticas['lag']==7]
+menores_coef_sp = estatisticas7[estatisticas7['coef_cob_vac']==estatisticas7['coef_cob_vac'].nsmallest(10).values[0]]
+for i in estatisticas7['coef_cob_vac'].nsmallest(10).values[1:]:
+    menores_coef_sp = menores_coef_sp.append(estatisticas7[estatisticas7['coef_cob_vac']==i])
+menores_coef_sp
+
+
+maiores_coef_sp = estatisticas7[estatisticas7['coef_cob_vac']==estatisticas7['coef_cob_vac'].nlargest(10).values[0]]
+for i in estatisticas7['coef_cob_vac'].nlargest(10).values[1:]:
+    maiores_coef_sp = maiores_coef_sp.append(estatisticas7[estatisticas7['coef_cob_vac']==i])
+
+maiores_coef_sp
+
+
+def plotar_graficos(df,coef):
+    for i in coef['cod_ibge_mun']:
+        mun2 = df.loc[df['city_ibge_code'] == i]
+
+        mask = np.random.rand(len(mun2)) <1
+        df_train = mun2[mask]
+        df_test = mun2[~mask]
+        expr = """mortes_lag ~  cobertura_vacinal"""
+        y_train, X_train = dmatrices(expr, df_train, return_type='dataframe')
+        poisson_training_results = sm.GLM(y_train, X_train, family=sm.families.Poisson()).fit()
+
+
+        poisson_predictions = poisson_training_results.get_prediction(X_train)
+        predictions_summary_frame = poisson_predictions.summary_frame()
+        y = predictions_summary_frame['mean'][:len(mun2)]
+
+        if len(mun2['sem_epidem_ano'])==37:
+            x = np.array(range(mun2['sem_epidem_ano'].min(), 202140, 1))
+        else:
+            x = np.array(range(202104, 202140, 1))
+            
+        y1 = mun2['mortes_lag']
+        y2 = mun2['cobertura_vacinal']
+
+        fig, ax1 = plt.subplots(figsize=(16,8))
+
+        # primeiro defino a sequência (numérica) do eixo x 
+        # (lembrando xticks não recebem strings)
+        ax1.set_xlabel('Semana Epidemiológica')
+        ax1.set_ylabel('Número de óbitos (lag 7)')
+
+        ax1.set_xticks(x)
+        # Agora coloco os nomes dos estados como estiquetas
+        ax1.set_xticklabels(x)
+        # Duplico e vinculo o novo axe `ax2` ao orginal `ax1`
+        ax2 = ax1.twinx()
+        ax2.set_ylabel('% cobertura vacinal')
+        # Plotar
+        obitos = ax1.plot(x,y1, color = 'tab:orange', label = 'Óbitos')
+        previsao = ax1.plot(x, y, 'o--', color = 'tab:green', label='Modelo')
+        vacinados = ax2.plot(x,y2, color = 'tab:blue', label = 'Vacinados')
+        ls = obitos + vacinados + previsao
+        labs = [l.get_label() for l in ls]
+        ax1.tick_params(axis='x', labelrotation=90)
+
+        ax1.legend(ls, labs, loc = 2)
+        ax1.set_title(mun2['estabelecimento_municipio_nome'].unique()[0])
+        #plt.show()
+        fig.savefig (mun2.estabelecimento_municipio_nome.unique()[0])
+        
+  plotar_graficos(base_sp2, menores_coef_sp)
+  
+  plotar_graficos(base_sp2,maiores_coef_sp)
+  
+  
+  #RIO DE JANEIRO
+  
+base_rj = pd.read_excel("C:/Users/Yasmin/OneDrive/Documentos/TCC/python/df_agp_rj.xlsx")
+base_rj = base_rj.astype({'new_deaths': float})
+base_rj.head()
+
+poucas_mortes_rj = base_rj.groupby(['estabelecimento_municipio_nome','city_ibge_code'])['new_deaths'].sum()
+poucas_mortes_rj = poucas_mortes_rj.nsmallest(10)
+poucas_mortes_rj
+
+estatisticas_rj = pd.DataFrame(columns=['lag','cod_ibge_mun','coef_cob_vac','aic','aicc', 'bic', 'pseudo_r'])
+estatisticas_rj
+
+estatisticas_rj = gerando_estatisticas(base_rj, estatisticas_rj, city_rj)
+estatisticas_rj  
+
+estatisticas_rj = estatisticas_rj.replace({'aicc': {np.Infinity:100000.0}})
+aicc_min_rj = estatisticas_rj.groupby(['cod_ibge_mun'])['aicc'].min()
+aicc_min_rj = aicc_min_rj.reset_index()
+
+aicc_min_rj = pd.merge(aicc_min_rj,estatisticas_rj[['cod_ibge_mun','aicc','lag']], how='left', on = ['cod_ibge_mun', 'aicc'])
+aicc_min_rj.drop(aicc_min_rj.index[(aicc_min_rj["aicc"] == 100000.0)],axis=0,inplace=True)
+
+plt.figure()
+labels = ['aicc']
+
+fig, (ax1) = plt.subplots(nrows=1, ncols=1, figsize=(9, 4))
+
+# rectangular box plot
+bplot1 = ax1.boxplot(aicc_min_rj['aicc'],
+                     vert=False,  # vertical box alignment
+                     patch_artist=True,  # fill with color
+                     labels=labels)  # will be used to label x-ticks
+ax1.set_title('Frequência AICc')
+
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=aicc_min_rj, x="lag",discrete=True)
+ax.set_ylabel('Frequência do AICc')
+
+
+r_max_rj = estatisticas_rj.groupby(['cod_ibge_mun'])['pseudo_r'].max()
+r_max_rj = r_max_rj.reset_index()
+r_max_rj.dropna(axis=0,inplace=True)
+r_max_rj = pd.merge(r_max_rj,estatisticas_rj[['cod_ibge_mun','pseudo_r','lag']], how='left', on = ['cod_ibge_mun', 'pseudo_r'])
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=r_max_rj, x="lag",discrete=True)
+ax.set_ylabel('Frequência de pseudo R²')
+
+
+base_rj2 = pd.DataFrame(columns=['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome',  
+    'sem_epidem_ano', 'qt_vacinados', 'qt_vacinados_acum', 'PIB_P_CAP', 'GINI', 'POP', 'city_ibge_code', 'cobertura_vacinal',   
+    'new_confirmed', 'new_deaths', 'mortes_lag'])
+for i in city_rj:
+    #Separando por município
+    mun_rj = base_rj.loc[base_rj['city_ibge_code'] == i]
+    # Lag de Semanas
+    b = mun_rj[7:]
+    lista = list(mun_rj.new_deaths[len(mun_rj)-len(b):])
+    a = mun_rj
+    lista.append(0.0) 
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    a['mortes_lag'] = lista
+    base_rj2 = base_rj2.append(a)
+
+base_rj2.head()
+
+
+estatisticas7_rj = estatisticas_rj[estatisticas_rj['lag']==7]
+menores_coef_rj = estatisticas7_rj[estatisticas7_rj['coef_cob_vac']==estatisticas7_rj['coef_cob_vac'].nsmallest(10).values[0]]
+for i in estatisticas7_rj['coef_cob_vac'].nsmallest(10).values[1:]:
+    menores_coef_rj = menores_coef_rj.append(estatisticas7_rj[estatisticas7_rj['coef_cob_vac']==i])
+menores_coef_rj
+
+maiores_coef_rj = estatisticas7_rj[estatisticas7_rj['coef_cob_vac']==estatisticas7_rj['coef_cob_vac'].nlargest(10).values[0]]
+for i in estatisticas7_rj['coef_cob_vac'].nlargest(10).values[1:]:
+    maiores_coef_rj = maiores_coef_rj.append(estatisticas7_rj[estatisticas7_rj['coef_cob_vac']==i])
+maiores_coef_rj
+
+plotar_graficos(base_rj2, menores_coef_rj)
+
+plotar_graficos(base_rj2, maiores_coef_rj)
+
+
+#SANTA CATARINA
+
+base_sc = pd.read_excel("C:/Users/Yasmin/OneDrive/Documentos/TCC/python/df_agp_sc.xlsx")
+base_sc = base_sc.astype({'new_deaths': float})
+base_sc.head()
+
+poucas_mortes_sc = base_sc.groupby(['estabelecimento_municipio_nome','city_ibge_code'])['new_deaths'].sum()
+poucas_mortes_sc = poucas_mortes_sc.nsmallest(10)
+poucas_mortes_sc
+
+base_sc = base_sc[(base_sc['estabelecimento_municipio_nome'] != 'BOCAINA DO SUL') &
+    (base_sc['estabelecimento_municipio_nome'] != 'CAPAO ALTO') &
+    (base_sc['estabelecimento_municipio_nome'] != 'FLOR DO SERTAO')&
+    (base_sc['estabelecimento_municipio_nome'] != 'NOVO HORIZONTE')&
+    (base_sc['estabelecimento_municipio_nome'] != 'PRESIDENTE CASTELLO BRANCO')&
+    (base_sc['estabelecimento_municipio_nome'] != 'SANTIAGO DO SUL')&
+    (base_sc['estabelecimento_municipio_nome'] != 'CUNHATAI')&
+    (base_sc['estabelecimento_municipio_nome'] != 'NOVA ITABERABA')&
+    (base_sc['estabelecimento_municipio_nome'] != 'PLANALTO ALEGRE')&
+    (base_sc['estabelecimento_municipio_nome'] != 'SANTA TEREZINHA DO PROGRESSO')]
+    
+ 
+estatisticas_sc = pd.DataFrame(columns=['lag','cod_ibge_mun','coef_cob_vac','aic','aicc','bic', 'pseudo_r'])
+estatisticas_sc
+
+estatisticas_sc = gerando_estatisticas(base_sc, estatisticas_sc, city_sc)
+estatisticas_sc
+
+estatisticas_sc = estatisticas_sc.replace({'aicc': {np.Infinity:100000.0}})
+aicc_min_sc = estatisticas_sc.groupby(['cod_ibge_mun'])['aicc'].min()
+aicc_min_sc = aicc_min_sc.reset_index()
+
+aicc_min_sc = pd.merge(aicc_min_sc,estatisticas_sc[['cod_ibge_mun','aicc','lag']], how='left', on = ['cod_ibge_mun', 'aicc'])
+aicc_min_sc.drop(aicc_min_sc.index[(aicc_min_sc["aicc"] == 100000.0)],axis=0,inplace=True)
+
+plt.figure()
+labels = ['aicc']
+
+fig, (ax1) = plt.subplots(nrows=1, ncols=1, figsize=(9, 4))
+
+# rectangular box plot
+bplot1 = ax1.boxplot(aicc_min_sc['aicc'],
+                     vert=False,  # vertical box alignment
+                     patch_artist=True,  # fill with color
+                     labels=labels)  # will be used to label x-ticks
+ax1.set_title('Frequência AICc')
+
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=aicc_min_sc, x="lag",discrete=True)
+ax.set_ylabel('Frequência do AICc')
+
+
+r_max_sc = estatisticas_sc.groupby(['cod_ibge_mun'])['pseudo_r'].max()
+r_max_sc = r_max_sc.reset_index()
+r_max_sc.dropna(axis=0,inplace=True)
+r_max_sc = pd.merge(r_max_sc,estatisticas_sc[['cod_ibge_mun','pseudo_r','lag']], how='left', on = ['cod_ibge_mun', 'pseudo_r'])
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=r_max_sc, x="lag",discrete=True)
+ax.set_ylabel('Frequência de pseudo R²')
+
+
+base_sc2 = pd.DataFrame(columns=['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome',  
+    'sem_epidem_ano', 'qt_vacinados', 'qt_vacinados_acum', 'PIB_P_CAP', 'GINI', 'POP', 'city_ibge_code', 'cobertura_vacinal',   
+    'new_confirmed', 'new_deaths', 'mortes_lag'])
+for i in city_sc:
+    #Separando por município
+    mun_sc = base_sc.loc[base_sc['city_ibge_code'] == i]
+    # Lag de Semanas
+    b = mun_sc[7:]
+    lista = list(mun_sc.new_deaths[len(mun_sc)-len(b):])
+    a = mun_sc
+    lista.append(0.0) 
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    a['mortes_lag'] = lista
+    base_sc2 = base_sc2.append(a)
+
+base_sc2.head()
+
+
+estatisticas7_sc = estatisticas_sc[estatisticas_sc['lag']==7]
+menores_coef_sc = estatisticas7_sc[estatisticas7_sc['coef_cob_vac']==estatisticas7_sc['coef_cob_vac'].nsmallest(10).values[0]]
+for i in estatisticas7_sc['coef_cob_vac'].nsmallest(10).values[1:]:
+    menores_coef_sc = menores_coef_sc.append(estatisticas7_sc[estatisticas7_sc['coef_cob_vac']==i])
+menores_coef_sc
+
+
+maiores_coef_sc = estatisticas7_sc[estatisticas7_sc['coef_cob_vac']==estatisticas7_sc['coef_cob_vac'].nlargest(10).values[0]]
+for i in estatisticas7_sc['coef_cob_vac'].nlargest(10).values[1:]:
+    maiores_coef_sc = maiores_coef_sc.append(estatisticas7_sc[estatisticas7_sc['coef_cob_vac']==i])
+maiores_coef_sc
+
+
+plotar_graficos(base_sc2, menores_coef_sc)
+
+plotar_graficos(base_sc2,maiores_coef_sc)
+
+
+#MATO GROSSO DO SUL
+
+base_ms = pd.read_excel("C:/Users/Yasmin/OneDrive/Documentos/TCC/python/df_agp_ms.xlsx")
+base_ms = base_ms.astype({'new_deaths': float})
+base_ms.head()
+
+poucas_mortes_ms = base_ms.groupby(['estabelecimento_municipio_nome','city_ibge_code'])['new_deaths'].sum()
+poucas_mortes_ms = poucas_mortes_ms.nsmallest(10)
+poucas_mortes_ms
+
+estatisticas_ms = pd.DataFrame(columns=['lag','cod_ibge_mun','coef_cob_vac','aic','aicc','bic', 'pseudo_r'])
+estatisticas_ms
+
+estatisticas_ms = gerando_estatisticas(base_ms, estatisticas_ms, city_ms)
+estatisticas_ms
+
+
+estatisticas_ms = estatisticas_ms.replace({'aicc': {np.Infinity:100000.0}})
+aicc_min_ms = estatisticas_ms.groupby(['cod_ibge_mun'])['aicc'].min()
+aicc_min_ms = aicc_min_ms.reset_index()
+
+aicc_min_ms = pd.merge(aicc_min_ms,estatisticas_ms[['cod_ibge_mun','aicc','lag']], how='left', on = ['cod_ibge_mun', 'aicc'])
+aicc_min_ms.drop(aicc_min_ms.index[(aicc_min_ms["aicc"] == 100000.0)],axis=0,inplace=True)
+
+plt.figure()
+labels = ['aicc']
+
+fig, (ax1) = plt.subplots(nrows=1, ncols=1, figsize=(9, 4))
+
+# rectangular box plot
+bplot1 = ax1.boxplot(aicc_min_ms['aicc'],
+                     vert=False,  # vertical box alignment
+                     patch_artist=True,  # fill with color
+                     labels=labels)  # will be used to label x-ticks
+ax1.set_title('Frequência AICc')
+
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=aicc_min_ms, x="lag",discrete=True)
+ax.set_ylabel('Frequência do AICc')
+
+r_max_ms = estatisticas_ms.groupby(['cod_ibge_mun'])['pseudo_r'].max()
+r_max_ms = r_max_ms.reset_index()
+r_max_ms.dropna(axis=0,inplace=True)
+r_max_ms = pd.merge(r_max_ms,estatisticas_ms[['cod_ibge_mun','pseudo_r','lag']], how='left', on = ['cod_ibge_mun', 'pseudo_r'])
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=r_max_ms, x="lag",discrete=True)
+ax.set_ylabel('Frequência de pseudo R²')
+
+
+base_ms2 = pd.DataFrame(columns=['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome',  
+    'sem_epidem_ano', 'qt_vacinados', 'qt_vacinados_acum', 'PIB_P_CAP', 'GINI', 'POP', 'city_ibge_code', 'cobertura_vacinal',   
+    'new_confirmed', 'new_deaths', 'mortes_lag'])
+for i in city_ms:
+    #Separando por município
+    mun_ms = base_ms.loc[base_ms['city_ibge_code'] == i]
+    # Lag de Semanas
+    b = mun_ms[7:]
+    lista = list(mun_ms.new_deaths[len(mun_ms)-len(b):])
+    a = mun_ms
+    lista.append(0.0) 
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    a['mortes_lag'] = lista
+    base_ms2 = base_ms2.append(a)
+
+base_ms2.head()
+
+
+estatisticas7_ms = estatisticas_ms[estatisticas_ms['lag']==7]
+menores_coef_ms = estatisticas7_ms[estatisticas7_ms['coef_cob_vac']==estatisticas7_ms['coef_cob_vac'].nsmallest(10).values[0]]
+for i in estatisticas7_ms['coef_cob_vac'].nsmallest(10).values[1:]:
+    menores_coef_ms = menores_coef_ms.append(estatisticas7_ms[estatisticas7_ms['coef_cob_vac']==i])
+menores_coef_ms
+
+
+maiores_coef_ms = estatisticas7_ms[estatisticas7_ms['coef_cob_vac']==estatisticas7_ms['coef_cob_vac'].nlargest(10).values[0]]
+for i in estatisticas7_ms['coef_cob_vac'].nlargest(10).values[1:]:
+    maiores_coef_ms = maiores_coef_ms.append(estatisticas7_ms[estatisticas7_ms['coef_cob_vac']==i])
+maiores_coef_ms
+
+plotar_graficos(base_ms2, menores_coef_ms)
+
+plotar_graficos(base_ms2,maiores_coef_ms)
+
+
+#PARA
+
+base_pa = pd.read_excel("C:/Users/Yasmin/OneDrive/Documentos/TCC/python/df_agp_pa.xlsx")
+base_pa = base_pa.astype({'new_deaths': float})
+base_pa.head()
+
+poucas_mortes_pa = base_pa.groupby(['estabelecimento_municipio_nome','city_ibge_code'])['new_deaths'].sum()
+poucas_mortes_pa = poucas_mortes_pa.nsmallest(10)
+poucas_mortes_pa
+
+base_pa = base_pa.replace({'new_deaths': {0.0 : 0.1}})
+
+base_pa = base_pa[(base_pa['estabelecimento_municipio_nome'] != 'SAPUCAIA')]
+
+estatisticas_pa = pd.DataFrame(columns=['lag','cod_ibge_mun','coef_cob_vac','aic','aicc','bic', 'pseudo_r'])
+estatisticas_pa
+
+estatisticas_pa = gerando_estatisticas(base_pa, estatisticas_pa, city_pa)
+estatisticas_pa
+
+estatisticas_pa = estatisticas_pa.replace({'aicc': {np.Infinity:100000.0}})
+aicc_min_pa = estatisticas_pa.groupby(['cod_ibge_mun'])['aicc'].min()
+aicc_min_pa = aicc_min_pa.reset_index()
+
+aicc_min_pa = pd.merge(aicc_min_pa,estatisticas_pa[['cod_ibge_mun','aicc','lag']], how='left', on = ['cod_ibge_mun', 'aicc'])
+aicc_min_pa.drop(aicc_min_pa.index[(aicc_min_pa["aicc"] == 100000.0)],axis=0,inplace=True)
+
+plt.figure()
+labels = ['aicc']
+
+fig, (ax1) = plt.subplots(nrows=1, ncols=1, figsize=(9, 4))
+
+# rectangular box plot
+bplot1 = ax1.boxplot(aicc_min_pa['aicc'],
+                     vert=False,  # vertical box alignment
+                     patch_artist=True,  # fill with color
+                     labels=labels)  # will be used to label x-ticks
+ax1.set_title('Frequência AICc')
+
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=aicc_min_pa, x="lag",discrete=True)
+ax.set_ylabel('Frequência do AICc')
+
+r_max_pa = estatisticas_pa.groupby(['cod_ibge_mun'])['pseudo_r'].max()
+r_max_pa = r_max_pa.reset_index()
+r_max_pa.dropna(axis=0,inplace=True)
+r_max_pa = pd.merge(r_max_pa,estatisticas_pa[['cod_ibge_mun','pseudo_r','lag']], how='left', on = ['cod_ibge_mun', 'pseudo_r'])
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=r_max_pa, x="lag",discrete=True)
+ax.set_ylabel('Frequência de pseudo R²')
+
+
+base_pa2 = pd.DataFrame(columns=['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome',  
+    'sem_epidem_ano', 'qt_vacinados', 'qt_vacinados_acum', 'PIB_P_CAP', 'GINI', 'POP', 'city_ibge_code', 'cobertura_vacinal',   
+    'new_confirmed', 'new_deaths', 'mortes_lag'])
+for i in city_pa:
+    #Separando por município
+    mun_pa = base_pa.loc[base_pa['city_ibge_code'] == i]
+    # Lag de Semanas
+    b = mun_pa[7:]
+    lista = list(mun_pa.new_deaths[len(mun_pa)-len(b):])
+    a = mun_pa
+    lista.append(0.0) 
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    a['mortes_lag'] = lista
+    base_pa2 = base_pa2.append(a)
+
+base_pa2.head()
+
+
+estatisticas7_pa = estatisticas_pa[estatisticas_pa['lag']==7]
+menores_coef_pa = estatisticas7_pa[estatisticas7_pa['coef_cob_vac']==estatisticas7_pa['coef_cob_vac'].nsmallest(10).values[0]]
+for i in estatisticas7_pa['coef_cob_vac'].nsmallest(10).values[1:]:
+    menores_coef_pa = menores_coef_pa.append(estatisticas7_pa[estatisticas7_pa['coef_cob_vac']==i])
+menores_coef_pa
+
+
+maiores_coef_pa = estatisticas7_pa[estatisticas7_pa['coef_cob_vac']==estatisticas7_pa['coef_cob_vac'].nlargest(10).values[0]]
+for i in estatisticas7_pa['coef_cob_vac'].nlargest(10).values[1:]:
+    maiores_coef_pa = maiores_coef_pa.append(estatisticas7_pa[estatisticas7_pa['coef_cob_vac']==i])
+maiores_coef_pa
+
+plotar_graficos(base_pa2, menores_coef_pa)
+
+plotar_graficos(base_pa2,maiores_coef_pa)
+
+
+#AMAPA
+
+base_ap = pd.read_excel("C:/Users/Yasmin/OneDrive/Documentos/TCC/python/df_agp_ap.xlsx")
+base_ap = base_ap.astype({'new_deaths': float})
+base_ap.head()
+
+poucas_mortes_ap = base_ap.groupby(['estabelecimento_municipio_nome','city_ibge_code'])['new_deaths'].sum()
+poucas_mortes_ap = poucas_mortes_ap.nsmallest(10)
+poucas_mortes_ap
+
+base_ap = base_ap.replace({'new_deaths': {0.0 : 0.1}})
+
+base_ap = base_ap[(base_ap['estabelecimento_municipio_nome'] != 'FERREIRA GOMES')&
+        (base_ap['estabelecimento_municipio_nome'] != 'PRACUUBA')&
+        (base_ap['estabelecimento_municipio_nome'] != 'SERRA DO NAVIO')&
+        (base_ap['estabelecimento_municipio_nome'] != 'CALCOENE')&
+        (base_ap['estabelecimento_municipio_nome'] != 'ITAUBAL')]
+        
+estatisticas_ap = pd.DataFrame(columns=['lag','cod_ibge_mun','coef_cob_vac','aic','aicc','bic', 'pseudo_r'])
+estatisticas_ap
+
+estatisticas_ap = gerando_estatisticas(base_ap, estatisticas_ap, city_ap)
+estatisticas_ap
+
+estatisticas_ap = estatisticas_ap.replace({'aicc': {np.Infinity:100000.0}})
+aicc_min_ap = estatisticas_ap.groupby(['cod_ibge_mun'])['aicc'].min()
+aicc_min_ap = aicc_min_ap.reset_index()
+
+aicc_min_ap = pd.merge(aicc_min_ap,estatisticas_ap[['cod_ibge_mun','aicc','lag']], how='left', on = ['cod_ibge_mun', 'aicc'])
+aicc_min_ap.drop(aicc_min_ap.index[(aicc_min_ap["aicc"] == 100000.0)],axis=0,inplace=True)
+
+plt.figure()
+labels = ['aicc']
+
+fig, (ax1) = plt.subplots(nrows=1, ncols=1, figsize=(9, 4))
+
+# rectangular box plot
+bplot1 = ax1.boxplot(aicc_min_ap['aicc'],
+                     vert=False,  # vertical box alignment
+                     patch_artist=True,  # fill with color
+                     labels=labels)  # will be used to label x-ticks
+ax1.set_title('Frequência AICc')
+
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=aicc_min_ap, x="lag",discrete=True)
+ax.set_ylabel('Frequência do AICc')
+
+r_max_ap = estatisticas_ap.groupby(['cod_ibge_mun'])['pseudo_r'].max()
+r_max_ap = r_max_ap.reset_index()
+r_max_ap.dropna(axis=0,inplace=True)
+r_max_ap = pd.merge(r_max_ap,estatisticas_ap[['cod_ibge_mun','pseudo_r','lag']], how='left', on = ['cod_ibge_mun', 'pseudo_r'])
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=r_max_ap, x="lag",discrete=True)
+ax.set_ylabel('Frequência de pseudo R²')
+
+
+base_ap2 = pd.DataFrame(columns=['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome',  
+    'sem_epidem_ano', 'qt_vacinados', 'qt_vacinados_acum', 'PIB_P_CAP', 'GINI', 'POP', 'city_ibge_code', 'cobertura_vacinal',   
+    'new_confirmed', 'new_deaths', 'mortes_lag'])
+for i in city_ap:
+    #Separando por município
+    mun_ap = base_ap.loc[base_ap['city_ibge_code'] == i]
+    # Lag de Semanas
+    b = mun_ap[7:]
+    lista = list(mun_ap.new_deaths[len(mun_ap)-len(b):])
+    a = mun_ap
+    lista.append(0.0) 
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    a['mortes_lag'] = lista
+    base_ap2 = base_ap2.append(a)
+
+base_ap2.head()
+
+
+estatisticas7_ap = estatisticas_ap[estatisticas_ap['lag']==7]
+menores_coef_ap = estatisticas7_ap[estatisticas7_ap['coef_cob_vac']==estatisticas7_ap['coef_cob_vac'].nsmallest(5).values[0]]
+for i in estatisticas7_ap['coef_cob_vac'].nsmallest(5).values[1:]:
+    menores_coef_ap = menores_coef_ap.append(estatisticas7_ap[estatisticas7_ap['coef_cob_vac']==i])
+menores_coef_ap
+
+
+maiores_coef_ap = estatisticas7_ap[estatisticas7_ap['coef_cob_vac']==estatisticas7_ap['coef_cob_vac'].nlargest(5).values[0]]
+for i in estatisticas7_ap['coef_cob_vac'].nlargest(5).values[1:]:
+    maiores_coef_ap = maiores_coef_ap.append(estatisticas7_ap[estatisticas7_ap['coef_cob_vac']==i])
+maiores_coef_ap
+
+plotar_graficos(base_ap2, menores_coef_ap)
+
+plotar_graficos(base_ap2,maiores_coef_ap)
+
+
+#RORAIMA
+
+base_rr = pd.read_excel("C:/Users/Yasmin/OneDrive/Documentos/TCC/python/df_agp_rr.xlsx")
+base_rr = base_rr.astype({'new_deaths': float})
+base_rr.head()
+
+poucas_mortes_rr = base_rr.groupby(['estabelecimento_municipio_nome','city_ibge_code'])['new_deaths'].sum()
+poucas_mortes_rr = poucas_mortes_rr.nsmallest(10)
+poucas_mortes_rr
+
+base_rr = base_rr.replace({'new_deaths': {0.0 : 0.1}})
+
+estatisticas_rr = pd.DataFrame(columns=['lag','cod_ibge_mun','coef_cob_vac','aic','aicc','bic', 'pseudo_r'])
+estatisticas_rr
+
+estatisticas_rr = gerando_estatisticas(base_rr, estatisticas_rr, city_rr)
+estatisticas_rr
+
+
+estatisticas_rr = estatisticas_rr.replace({'aicc': {np.Infinity:100000.0}})
+aicc_min_rr = estatisticas_rr.groupby(['cod_ibge_mun'])['aicc'].min()
+aicc_min_rr = aicc_min_rr.reset_index()
+
+aicc_min_rr = pd.merge(aicc_min_rr,estatisticas_rr[['cod_ibge_mun','aicc','lag']], how='left', on = ['cod_ibge_mun', 'aicc'])
+aicc_min_rr.drop(aicc_min_rr.index[(aicc_min_rr["aicc"] == 100000.0)],axis=0,inplace=True)
+
+plt.figure()
+labels = ['aicc']
+
+fig, (ax1) = plt.subplots(nrows=1, ncols=1, figsize=(9, 4))
+
+# rectangular box plot
+bplot1 = ax1.boxplot(aicc_min_rr['aicc'],
+                     vert=False,  # vertical box alignment
+                     patch_artist=True,  # fill with color
+                     labels=labels)  # will be used to label x-ticks
+ax1.set_title('Frequência AICc')
+
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=aicc_min_rr, x="lag",discrete=True)
+ax.set_ylabel('Frequência do AICc')
+
+
+r_max_rr = estatisticas_rr.groupby(['cod_ibge_mun'])['pseudo_r'].max()
+r_max_rr = r_max_rr.reset_index()
+r_max_rr.dropna(axis=0,inplace=True)
+r_max_rr = pd.merge(r_max_rr,estatisticas_rr[['cod_ibge_mun','pseudo_r','lag']], how='left', on = ['cod_ibge_mun', 'pseudo_r'])
+
+fig, ax = plt.subplots(1,1,figsize=(6,4))
+sns.histplot(data=r_max_rr, x="lag",discrete=True)
+ax.set_ylabel('Frequência de pseudo R²')
+
+
+base_rr2 = pd.DataFrame(columns=['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome',  
+    'sem_epidem_ano', 'qt_vacinados', 'qt_vacinados_acum', 'PIB_P_CAP', 'GINI', 'POP', 'city_ibge_code', 'cobertura_vacinal',   
+    'new_confirmed', 'new_deaths', 'mortes_lag'])
+for i in city_rr:
+    #Separando por município
+    mun_rr = base_rr.loc[base_rr['city_ibge_code'] == i]
+    # Lag de Semanas
+    b = mun_rr[7:]
+    lista = list(mun_rr.new_deaths[len(mun_rr)-len(b):])
+    a = mun_rr
+    lista.append(0.0) 
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    lista.append(0.0)
+    a['mortes_lag'] = lista
+    base_rr2 = base_rr2.append(a)
+
+base_rr2.head()
+
+
+estatisticas7_rr = estatisticas_rr[estatisticas_rr['lag']==7]
+menores_coef_rr = estatisticas7_rr[estatisticas7_rr['coef_cob_vac']==estatisticas7_rr['coef_cob_vac'].nsmallest(5).values[0]]
+for i in estatisticas7_rr['coef_cob_vac'].nsmallest(5).values[1:]:
+    menores_coef_rr = menores_coef_rr.append(estatisticas7_rr[estatisticas7_rr['coef_cob_vac']==i])
+menores_coef_rr
+
+
+maiores_coef_rr = estatisticas7_rr[estatisticas7_rr['coef_cob_vac']==estatisticas7_rr['coef_cob_vac'].nlargest(5).values[0]]
+for i in estatisticas7_rr['coef_cob_vac'].nlargest(5).values[1:]:
+    maiores_coef_rr = maiores_coef_rr.append(estatisticas7_rr[estatisticas7_rr['coef_cob_vac']==i])
+maiores_coef_rr
+
+
+plotar_graficos(base_rr2, menores_coef_rr)
+
+plotar_graficos(base_rr2,maiores_coef_rr)
