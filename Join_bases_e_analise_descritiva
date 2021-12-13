@@ -1,0 +1,207 @@
+import pandas as pd
+import psycopg2
+from sqlalchemy import create_engine
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import plotly.express as px
+
+#Criando engine do sqlalchemy
+engine = create_engine('postgresql://postgres@localhost:5432/vacinacao')
+
+conn = psycopg2.connect("host=localhost dbname=vacinacao user=postgres password=postgres")
+cur = conn.cursor()
+
+#BASE SÃO PAULO
+cur.execute("""
+SELECT  * from sipni_tratada_sp
+""")
+sipni_sp=cur.fetchall()
+
+df_sipni_sp = pd.DataFrame(sipni_sp, columns = ['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome','estabelecimento_uf', 'sem_epidem_ano', 'paciente_enumsexobiologico','paciente_racacor_valor', 'vacina_categoria_nome','vacina_grupoatendimento_nome', 'vacina_descricao_dose','vacina_nome','qt_vacinados'])
+df_sipni_sp.head()
+
+#BASE SANTA CATARINA
+cur.execute("""
+SELECT  * from sipni_tratada_sc
+""")
+sipni_sc=cur.fetchall()
+
+df_sipni_sc = pd.DataFrame(sipni_sc, columns = ['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome','estabelecimento_uf', 'sem_epidem_ano', 'paciente_enumsexobiologico','paciente_racacor_valor', 'vacina_categoria_nome','vacina_grupoatendimento_nome', 'vacina_descricao_dose','vacina_nome','qt_vacinados'])
+
+#BASE MATO GROSSO DO SUL
+cur.execute("""
+SELECT  * from sipni_tratada_ms
+""")
+sipni_ms=cur.fetchall()
+
+df_sipni_ms = pd.DataFrame(sipni_ms, columns = ['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome','estabelecimento_uf', 'sem_epidem_ano', 'paciente_enumsexobiologico','paciente_racacor_valor', 'vacina_categoria_nome','vacina_grupoatendimento_nome', 'vacina_descricao_dose','vacina_nome','qt_vacinados'])
+
+#BASE RIO DE JANEIRO
+cur.execute("""
+SELECT  * from sipni_tratada_rj
+""")
+sipni_rj=cur.fetchall()
+
+df_sipni_rj = pd.DataFrame(sipni_rj, columns = ['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome','estabelecimento_uf', 'sem_epidem_ano', 'paciente_enumsexobiologico','paciente_racacor_valor', 'vacina_categoria_nome','vacina_grupoatendimento_nome', 'vacina_descricao_dose','vacina_nome','qt_vacinados'])
+
+#BASE PARÁ
+cur.execute("""
+SELECT  * from sipni_tratada_pa
+""")
+sipni_pa=cur.fetchall()
+
+df_sipni_pa = pd.DataFrame(sipni_pa, columns = ['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome','estabelecimento_uf', 'sem_epidem_ano', 'paciente_enumsexobiologico','paciente_racacor_valor', 'vacina_categoria_nome','vacina_grupoatendimento_nome', 'vacina_descricao_dose','vacina_nome','qt_vacinados'])
+
+#BASE AMAPÁ
+cur.execute("""
+SELECT  * from sipni_tratada_ap
+""")
+sipni_ap=cur.fetchall()
+
+df_sipni_ap = pd.DataFrame(sipni_ap, columns = ['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome','estabelecimento_uf', 'sem_epidem_ano', 'paciente_enumsexobiologico','paciente_racacor_valor', 'vacina_categoria_nome','vacina_grupoatendimento_nome', 'vacina_descricao_dose','vacina_nome','qt_vacinados'])
+
+#BASE RORAIMA
+cur.execute("""
+SELECT  * from sipni_tratada_rr
+""")
+sipni_rr=cur.fetchall()
+
+df_sipni_rr = pd.DataFrame(sipni_rr, columns = ['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome','estabelecimento_uf', 'sem_epidem_ano', 'paciente_enumsexobiologico','paciente_racacor_valor', 'vacina_categoria_nome','vacina_grupoatendimento_nome', 'vacina_descricao_dose','vacina_nome','qt_vacinados'])
+
+#BASE TOTAL
+cur.execute("""
+SELECT  * from sipni_tratada_total
+""")
+sipni_total=cur.fetchall()
+
+df_sipni_total = pd.DataFrame(sipni_total, columns = ['estabelecimento_municipio_codigo', 'estabelecimento_municipio_nome','estabelecimento_uf', 'sem_epidem_ano', 'paciente_enumsexobiologico','paciente_racacor_valor', 'vacina_categoria_nome','vacina_grupoatendimento_nome', 'vacina_descricao_dose','vacina_nome','qt_vacinados'])
+
+
+#quantidade de vacinados por Estado
+df_sipni_total.groupby(['estabelecimento_uf'])['qt_vacinados'].sum().sort_values(ascending=True).plot(kind = 'bar', xlabel = 'UF do estabelecimento', ylabel = 'Quantidade de vacinados', rot = 0)
+
+
+#quantidade de vacinados pelo sexo
+df_sipni_total.groupby(['paciente_enumsexobiologico'])['qt_vacinados'].sum().sort_values().plot(kind = 'bar', xlabel = 'Sexo biológico', ylabel = 'Quantidade de vacinados', rot = 0)
+
+
+#quantidade de vacinados pela raça
+df_sipni_total.groupby(['paciente_racacor_valor'])['qt_vacinados'].sum().sort_values().plot(kind = 'bar', xlabel = 'Raça', ylabel = 'Quantidade de vacinados', rot = 45)
+
+
+#quantidade de vacindados pelo nome da vacina
+df_sipni_total.groupby(['vacina_nome'])['qt_vacinados'].sum().sort_values().plot(kind = 'bar', xlabel = 'Nome da Vacina', ylabel = 'Quantidade de vacinados', rot = 0)
+
+
+#quantidade de vacinados pelo grupo de atendimento
+df_sipni_total.groupby(['vacina_categoria_nome'])['qt_vacinados'].sum().sort_values().plot(kind = 'barh', xlabel = 'Grupo de atendimento', ylabel = 'Quantidade de vacinados', rot = 0)
+
+
+# BASE COM COLUNA ACUMULADA SP 
+df_agp_sp = df_sipni_sp.groupby(['estabelecimento_municipio_codigo','estabelecimento_municipio_nome','sem_epidem_ano'])['qt_vacinados'].sum()
+df_agp_sp = df_agp_sp.reset_index()
+df_agp_sp['qt_vacinados_acum'] = df_agp_sp.groupby('estabelecimento_municipio_nome')['qt_vacinados'].transform(pd.Series.cumsum)
+
+
+# BASE COM COLUNA ACUMULADA SC
+df_agp_sc = df_sipni_sc.groupby(['estabelecimento_municipio_codigo','estabelecimento_municipio_nome','sem_epidem_ano'])['qt_vacinados'].sum()
+df_agp_sc = df_agp_sc.reset_index()
+df_agp_sc['qt_vacinados_acum'] = df_agp_sc.groupby('estabelecimento_municipio_nome')['qt_vacinados'].transform(pd.Series.cumsum)
+
+# BASE COM COLUNA ACUMULADA MS
+df_agp_ms = df_sipni_ms.groupby(['estabelecimento_municipio_codigo','estabelecimento_municipio_nome','sem_epidem_ano'])['qt_vacinados'].sum()
+df_agp_ms = df_agp_ms.reset_index()
+df_agp_ms['qt_vacinados_acum'] = df_agp_ms.groupby('estabelecimento_municipio_nome')['qt_vacinados'].transform(pd.Series.cumsum)
+
+# BASE COM COLUNA ACUMULADA RJ
+df_agp_rj = df_sipni_rj.groupby(['estabelecimento_municipio_codigo','estabelecimento_municipio_nome','sem_epidem_ano'])['qt_vacinados'].sum()
+df_agp_rj = df_agp_rj.reset_index()
+df_agp_rj['qt_vacinados_acum'] = df_agp_rj.groupby('estabelecimento_municipio_nome')['qt_vacinados'].transform(pd.Series.cumsum)
+
+# BASE COM COLUNA ACUMULADA PA
+df_agp_pa = df_sipni_pa.groupby(['estabelecimento_municipio_codigo','estabelecimento_municipio_nome','sem_epidem_ano'])['qt_vacinados'].sum()
+df_agp_pa = df_agp_pa.reset_index()
+df_agp_pa['qt_vacinados_acum'] = df_agp_pa.groupby('estabelecimento_municipio_nome')['qt_vacinados'].transform(pd.Series.cumsum)
+
+# BASE COM COLUNA ACUMULADA AP
+df_agp_ap = df_sipni_ap.groupby(['estabelecimento_municipio_codigo','estabelecimento_municipio_nome','sem_epidem_ano'])['qt_vacinados'].sum()
+df_agp_ap = df_agp_ap.reset_index()
+df_agp_ap['qt_vacinados_acum'] = df_agp_ap.groupby('estabelecimento_municipio_nome')['qt_vacinados'].transform(pd.Series.cumsum)
+
+# BASE COM COLUNA ACUMULADA RR
+df_agp_rr = df_sipni_rr.groupby(['estabelecimento_municipio_codigo','estabelecimento_municipio_nome','sem_epidem_ano'])['qt_vacinados'].sum()
+df_agp_rr = df_agp_rr.reset_index()
+df_agp_rr['qt_vacinados_acum'] = df_agp_rr.groupby('estabelecimento_municipio_nome')['qt_vacinados'].transform(pd.Series.cumsum)
+
+
+#Análise descritiva
+
+#contando os nulos do sipni
+(df_sipni_total.isnull().sum()/df_sipni_total.shape[0]*100).plot(kind='barh')
+
+#IBGE
+base_dem = pd.read_excel('C:/Users/Yasmin/OneDrive/Documentos/TCC/Dados 3.1A.xlsx')
+base_dem = base_dem.rename(columns={'COD6': 'estabelecimento_municipio_codigo', 'COD7':'city_ibge_code'})
+base_dem.head()
+
+#quantidade de nulos
+((base_dem.isnull().sum()/base_dem.shape[0])*100)
+
+#top 10 Estados com as maiores populações 
+
+top10_uf = base_dem.groupby('UF')['POP'].sum().nlargest(10)
+top10_uf = top10_uf.reset_index()
+plt.bar(top10_uf['UF'], height=top10_uf['POP'])
+
+plt.ylabel('População')
+plt.xlabel('Unidades Federativas')
+plt.title('Top 10 dos Estados com as maiores populações')
+
+#join base SIPNI com IBGE
+df_agp_rr = pd.merge(df_agp_rr,base_dem[['estabelecimento_municipio_codigo','PIB_P_CAP','GINI','POP','city_ibge_code']], how='left', on='estabelecimento_municipio_codigo')
+
+#exemplo de criação da coluna cobertura vacinal na base do rj
+df_agp_rj['cobertura_vacinal'] = df_agp_rj['qt_vacinados_acum']/df_agp_rj['POP']*100
+df_agp_rj['cobertura_vacinal'] = pd.Series([round(val, 2) for val in df_agp_rj['cobertura_vacinal']], index = df_agp_rj.index)
+
+#base Brasil.IO
+base_casos = pd.read_csv('C:/Users/Yasmin/OneDrive/Documentos/TCC/caso_full.csv')
+
+#quantidade de nulos
+((base_casos.isnull().sum()/base_casos.shape[0])*100).plot(kind='barh')
+
+#Detectando Outliers com boxplot 
+sns.boxplot(x=base_casos['city_ibge_code'])
+
+#gráfico de dispersão dos novos casos
+fig, ax = plt.subplots(figsize=(16,8))
+ax.scatter(base_casos['epidemiological_week'],base_casos['new_confirmed'])
+ax.set_xlabel('Semana Epidemiologica')
+ax.set_ylabel('Casos confirmados')
+plt.show()
+
+l_week_unicos = base_casos['epidemiological_week'].sort_values(ascending=True).unique()
+
+def nova_coluna_week(lista):
+    dicio = {}
+    cont = 0
+    for i in lista:
+        cont = cont + 1 
+        dicio[i] = cont
+    return dicio
+    
+dicio_novo_count = nova_coluna_week(l_week_unicos)
+base_casos['sequential_week'] = base_casos['epidemiological_week'].apply(lambda epidemiological_week: dicio_novo_count[epidemiological_week])
+base_casos.head()
+
+fig, ax = plt.subplots(figsize=(16,8))
+z = np.arange(89)
+width = 1.0
+ax.scatter(base_casos['sequential_week'],base_casos['new_confirmed'])
+ax.set_xticks(width+z)
+ax.set_xticklabels(l_week_unicos)
+ax.set_xlabel('Semana Epidemiologica')
+ax.set_ylabel('Novos casos confirmados')
+plt.xticks(rotation=90)
+plt.show()
