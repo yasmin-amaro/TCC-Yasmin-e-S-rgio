@@ -1,0 +1,76 @@
+#Consulta SQL para reduzir a dimensão dos dados do SIPNI à nivel municipal
+
+CREATE TABLE SIPNI_TRATADA_SP as 
+
+(SELECT
+cast (estabelecimento_municipio_codigo as int),
+estabelecimento_municipio_nome,
+estabelecimento_uf, 	
+cast(sem_epidem_ano as int),
+paciente_enumsexobiologico,
+paciente_racacor_valor,
+vacina_categoria_nome,
+vacina_grupoatendimento_nome,
+vacina_descricao_dose,
+vacina_nome,
+sum (qt_vacinados) as qt_vacinados 
+FROM
+
+(SELECT
+estabelecimento_municipio_codigo,
+estabelecimento_municipio_nome,
+estabelecimento_uf, 	
+S."sem_epidem_ano",
+paciente_enumsexobiologico,
+paciente_racacor_valor,
+vacina_categoria_nome,
+vacina_grupoatendimento_nome,
+
+CASE 	WHEN vacina_codigo = '88' THEN 'unica'
+	WHEN vacina_descricao_dose LIKE '1ª%' and vacina_descricao_dose NOT LIKE '%Revacinação%' 	THEN 'D1'
+	WHEN vacina_descricao_dose LIKE '2ª%' THEN 'D2'
+  ELSE 'D3_reforco' END vacina_descricao_dose,
+  
+CASE 	WHEN vacina_codigo IN ('89', '85') 	THEN 'astrazeneca'
+ 	WHEN vacina_codigo = '88' THEN 'janssen'
+  WHEN vacina_codigo = '86' THEN 'coronavac'
+  WHEN vacina_codigo = '87' THEN 'pfizer'
+  ELSE 'sem_identificacao' END AS vacina_nome,
+  
+COUNT (paciente_id) as qt_vacinados   
+
+FROM public."SIPNI_SP"
+
+INNER JOIN public."SEM_EPIDEM_2021" as S 
+ON CAST(vacina_dataaplicacao as varchar(10)) = CAST(S."data" as varchar(10))
+
+WHERE TO_DATE (vacina_dataaplicacao,'YYYY-MM-DD') between TO_DATE('2021-01-17','YYYY-MM-DD') 
+  and TO_DATE ('2021-09-30','YYYY-MM-DD')
+
+GROUP BY
+estabelecimento_municipio_codigo,
+estabelecimento_municipio_nome,
+estabelecimento_uf, 	
+S."sem_epidem_ano",
+paciente_enumsexobiologico,
+paciente_racacor_valor,          	
+vacina_categoria_nome,
+vacina_grupoatendimento_nome,
+vacina_descricao_dose,
+vacina_nome,
+vacina_codigo,
+vacina_dataaplicacao
+) as T
+
+GROUP BY
+estabelecimento_municipio_codigo,
+estabelecimento_municipio_nome,
+estabelecimento_uf, 	
+sem_epidem_ano,
+paciente_enumsexobiologico,
+paciente_racacor_valor,
+vacina_categoria_nome,
+vacina_grupoatendimento_nome,
+vacina_descricao_dose,
+vacina_nome
+)
